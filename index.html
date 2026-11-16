@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>So What Voicing</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#22262b;color:#f3ead8;font-family:sans-serif}
+.w{max-width:640px;margin:0 auto;padding:12px}
+h1{font-size:22px;margin:4px 0}
+h2{font-size:17px;margin:16px 0 4px}
+#ban{padding:6px 8px;border-radius:6px;font-size:13px;margin:8px 0}
+.ok{background:#2f5d3a}.bad{background:#8a2f2f}
+button{min-height:44px;min-width:44px;margin:2px;border:0;border-radius:8px;background:#e0a85a;color:#222;font-size:15px}
+button:active{background:#fff}
+button.sel{background:#7cc6c0}
+#keys{display:flex;flex-wrap:wrap}
+canvas{width:100%;background:#111;border-radius:6px;display:block;margin-top:8px}
+p{font-size:14px;line-height:1.4}
+#oct{display:flex;flex-wrap:wrap}
+#pick{color:#7cc6c0}
+</style></head><body><div class="w">
+<h1>So What voicing</h1>
+<div id="ban">checking...</div>
+<p>Three stacked fourths, then a major third on top. Pick a key for the lowest note.</p>
+<div id="keys"></div>
+<div>
+<button id="play">Play chord</button>
+<button id="slide">Slide down a whole step</button>
+<button id="all">All 12 keys</button>
+</div>
+<canvas id="cv" width="640" height="170"></canvas>
+<p id="info"></p>
+<h2>Which octave?</h2>
+<p>A bass D, then the chord (E A D G B, the voicing from E) over it. Play each one with the record going and see which lines up.</p>
+<div id="oct"></div>
+<p id="octinfo"></p>
+<p id="pick"></p>
+<h2>Combo rule</h2>
+<p>Within 50 ms of the beat adds 1. Late (51 to 120 ms) keeps the combo as it is. Later than that, or no hit, resets it to 0.</p>
+</div>
+<script>
+var NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+function voicing(root){return [root,root+5,root+10,root+15,root+19];}
+function voicingBad(root){return [root,root+5,root+10,root+14,root+19];}
+function slideDown(root){return root-2;}
+function nameOf(m){return NAMES[((m%12)+12)%12];}
+function rootFor(i){return 48+i;}
+function fits(v){
+return v.length===5&&v[1]-v[0]===5&&v[2]-v[1]===5&&v[3]-v[2]===5&&v[4]-v[3]===4;}
+function octPlan(bassOct,fn){
+var bass=12*(bassOct+1)+2;
+var cr=bass+14;
+return {bass:bass,chord:fn(cr)};
+}
+function octBad(bassOct,fn){var p=octPlan(bassOct,fn);p.bass+=12;return p;}
+// pure: late-hit combo rule. late ms after the beat (null = no hit).
+function comboNext(combo,late){
+if(late===null||late>120)return 0;
+if(late>50)return combo;
+return combo+1;
+}
+function comboBad(combo,late){
+if(late===null||late>50)return 0;
+return combo+1;
+}
+function comboCheck(f){
+var r=[];
+r.push(f(4,0)===5);
+r.push(f(4,50)===5);
+r.push(f(4,51)===4);
+r.push(f(4,120)===4);
+r.push(f(4,121)===0);
+r.push(f(4,null)===0);
+r.push(f(0,51)===0);
+return r;
+}
+function check(v,slide){
+var r=[];
+r.push(v(50).join()==='50,55,60,65,69');
+r.push(v(53).join()==='53,58,63,68,72');
+r.push(slide(50)===48);
+r.push(nameOf(-1)==='B');
+r.push(nameOf(rootFor(0))==='C'&&nameOf(rootFor(11))==='B');
+for(var i=0;i<12;i++){
+var n=v(rootFor(i));
+r.push(fits(n));
+r.push(nameOf(n[0])===NAMES[i]);
+r.push(nameOf(n[4])===NAMES[(i+7)%12]);
+}
+return r;
+}
+function octCheck(f){
+var r=[],a=f(2,voicing),b=f(3,voicing),c=f(4,voicing);
+r.push(a.bass===38&&b.bass===50&&c.bass===62);
+r.push(nameOf(a.bass)==='D'&&nameOf(c.bass)==='D');
+r.push(a.chord.join()==='52,57,62,67,71');
+r.push(b.chord[0]-b.bass===14);
+r.push(fits(c.chord));
+r.push(c.chord[0]-a.chord[0]===24);
+return r;
+}
+function selfTest(){
+var good=check(voicing,slideDown).every(Boolean);
+var bad=check(voicingBad,slideDown).every(Boolean);
+var og=octCheck(octPlan).every(Boolean);
+var ob=octCheck(octBad).every(Boolean);
+var cg=comboCheck(comboNext).every(Boolean);
+var cb=comboCheck(comboBad).every(Boolean);
+var b=document.getElementById('ban');
+if(good&&!bad&&og&&!ob&&cg&&!cb){b.className='ok';b.textContent='Self-test passed: 12 keys match the shape, octave positions are right, late-hit combo rule holds (broken copies rejected).';}
+else{b.className='bad';b.textContent='Self-test FAILED: good='+good+' broken='+bad+' oct='+og+' octBroken='+ob+' combo='+cg+' comboBroken='+cb;}
+}
+var root=50,ctx=null;
+function audio(){if(!ctx){var A=window.AudioContext||window.webkitAudioContext;ctx=new A();}if(ctx.resume)ctx.resume();return ctx;}
+function tone(m,t,d,type,vol){
+var c=audio(),o=c.createOscillator(),g=c.createGain();
+o.type=type||'triangle';o.frequency.value=440*Math.pow(2,(m-69)/12);
+g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(vol||0.16,t+0.02);
+g.gain.exponentialRampToValueAtTime(0.001,t+d);
+o.connect(g);g.connect(c.destination);o.start(t);o.stop(t+d+0.05);
+}
+function chord(r,when,d){voicing(r).forEach(function(m){tone(m,when,d);});}
+function draw(notes){
+var cv=document.getElementById('cv'),g=cv.getContext('2d');
+g.clearRect(0,0,640,170);
+var lo=36,hi=84,whites=[];
+for(var m=lo;m<=hi;m++){if([1,3,6,8,10].indexOf(m%12)<0)whites.push(m);}
+var w=640/whites.length,pos={};
+whites.forEach(function(m,i){
+pos[m]=i*w;
+g.fillStyle=notes.indexOf(m)>=0?'#e0a85a':'#f3ead8';
+g.fillRect(i*w+1,0,w-2,170);
+if(notes.indexOf(m)>=0){g.fillStyle='#222';g.font='11px sans-serif';g.fillText(nameOf(m),i*w+3,160);}
+});
+for(var m2=lo;m2<=hi;m2++){
+if([1,3,6,8,10].indexOf(m2%12)>=0){
+var x=pos[m2-1]+w*0.7;
+g.fillStyle=notes.indexOf(m2)>=0?'#c0502a':'#222';
+g.fillRect(x,0,w*0.6,100);
+}}
+}
+function setRoot(r){
+root=r;var s=voicing(r);draw(s);
+document.getElementById('info').textContent=
+'Root '+nameOf(r)+': '+s.map(nameOf).join(' - ')+' (fourth, fourth, fourth, major third)';
+Array.prototype.forEach.call(document.querySelectorAll('#keys button'),function(b,i){
+b.className=(i===((r%12)+12)%12)?'sel':'';});
+}
+function playRoot(){chord(root,audio().currentTime+0.02,1.6);}
+function slide(){
+var t=audio().currentTime+0.02,a=root,b=slideDown(root);
+chord(a,t,1.0);
+setTimeout(function(){setRoot(b);},1100);
+chord(b,t+1.1,1.6);
+setTimeout(function(){setRoot(a);},3000);
+}
+function all(){
+var t=audio().currentTime+0.02;
+for(var i=0;i<12;i++){(function(i){
+var r=rootFor(i);chord(r,t+i*0.8,0.75);
+setTimeout(function(){setRoot(r);},i*800);})(i);}
+}
+function playOct(o){
+var p=octPlan(o,voicing),t=audio().currentTime+0.02;
+tone(p.bass,t,2.2,'sine',0.3);
+p.chord.forEach(function(m){tone(m,t+0.02,2.0);});
+draw(p.bass>=36?[p.bass].concat(p.chord):p.chord);
+document.getElementById('octinfo').textContent='Bass D'+o+' (midi '+p.bass+'), chord '+p.chord.map(function(m){return nameOf(m)+(Math.floor(m/12)-1);}).join(' ');
+}
+function pickOct(o){
+try{window.localStorage.setItem('sowhat_oct',o);}catch(e){}
+document.getElementById('pick').textContent='Logged: record sounds like bass D'+o+'.';
+}
+var od=document.getElementById('oct');
+[2,3,4].forEach(function(o){
+var b=document.createElement('button');b.textContent='Play D'+o;
+b.addEventListener('click',function(){playOct(o);});
+od.appendChild(b);
+var c=document.createElement('button');c.textContent='D'+o+' matches';
+c.addEventListener('click',function(){pickOct(o);});
+od.appendChild(c);
+});
+try{var sv=window.localStorage.getItem('sowhat_oct');if(sv)document.getElementById('pick').textContent='Logged: record sounds like bass D'+sv+'.';}catch(e){}
+var kd=document.getElementById('keys');
+NAMES.forEach(function(n,i){
+var b=document.createElement('button');b.textContent=n;
+b.addEventListener('click',function(){setRoot(rootFor(i));playRoot();});
+kd.appendChild(b);});
+document.getElementById('play').addEventListener('click',playRoot);
+document.getElementById('slide').addEventListener('click',slide);
+document.getElementById('all').addEventListener('click',all);
+try{selfTest();}catch(e){var bb=document.getElementById('ban');bb.className='bad';bb.textContent='Error: '+e.message;}
+setRoot(50);
+</script></body></html>
